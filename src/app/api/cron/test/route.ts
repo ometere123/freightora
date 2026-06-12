@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createPublicClient, http, defineChain, encodeFunctionData } from "viem";
+import { createClient } from "genlayer-js";
+import { studionet as glStudionet } from "genlayer-js/chains";
 
 const RPC_URL = process.env.NEXT_PUBLIC_GENLAYER_RPC_URL ?? "https://studio.genlayer.com/api";
 const CONTRACT = process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS ?? "";
@@ -56,6 +58,19 @@ export async function GET() {
     results.viem_result = val;
   } catch (e) {
     results.viem_error = e instanceof Error ? e.message : String(e);
+  }
+
+  // Test 3: genlayer-js readContract (no provider = server-safe read)
+  try {
+    const glClient = createClient({ chain: glStudionet });
+    const val = await glClient.readContract({
+      address: CONTRACT as `0x${string}`,
+      functionName: "get_config",
+      args: [],
+    });
+    results.genlayer_result = val;
+  } catch (e) {
+    results.genlayer_error = e instanceof Error ? e.message : String(e);
   }
 
   return NextResponse.json(results);
