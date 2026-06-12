@@ -56,8 +56,16 @@ export async function GET(req: NextRequest) {
         return "0xf21f"; // 61999
       }
       if (method === "eth_sendTransaction") {
-        const tx = (params as Parameters<typeof viemWallet.sendTransaction>)[0];
-        return viemWallet.sendTransaction(tx);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const tx = (params as any[])[0] as Record<string, unknown>;
+        return viemWallet.sendTransaction({
+          ...(tx as Parameters<typeof viemWallet.sendTransaction>[0]),
+          // Force EIP-1559 (type 2) — GenLayer rejects legacy type-0 raw txs
+          type: "eip1559",
+          maxFeePerGas: 0n,
+          maxPriorityFeePerGas: 0n,
+          gasPrice: undefined,
+        });
       }
       // Forward everything else to the public transport
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
