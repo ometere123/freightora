@@ -85,8 +85,10 @@ export async function GET(req: NextRequest) {
   const publicClient = createPublicClient({ chain: studionet, transport });
   const walletClient = createWalletClient({ chain: studionet, account, transport });
 
+  let step = "init";
   try {
     // Get review fee
+    step = "get_config";
     const configRaw = await publicClient.readContract({
       address: CONTRACT, abi: ABI, functionName: "get_config",
     });
@@ -94,10 +96,12 @@ export async function GET(req: NextRequest) {
     const fee = BigInt(config?.review_fee ?? "10000000000000000");
 
     // List all case IDs
+    step = "list_cases";
     const idsRaw = await publicClient.readContract({
       address: CONTRACT, abi: ABI, functionName: "list_cases",
       args: ["0", "200"],
     });
+    step = "parse_ids";
     const ids = parseJson<string[]>(idsRaw);
     if (!ids?.length) {
       return NextResponse.json({ triggered: 0, message: "No cases found" });
@@ -161,7 +165,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Cron failed" },
+      { step, error: e instanceof Error ? e.message : String(e) },
       { status: 500 }
     );
   }
