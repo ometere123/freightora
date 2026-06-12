@@ -196,7 +196,7 @@ export function TxBanner({
           <p className="text-base text-fog-grey">{message}</p>
           {hash && (
             <a
-              href={`${genlayerConfig.explorerUrl}tx/${hash}`}
+              href={`${genlayerConfig.explorerUrl.replace(/\/?$/, "/")}tx/${hash}`}
               target="_blank"
               rel="noopener noreferrer"
               className="mono-font text-xs text-signal-cyan/60 hover:text-signal-cyan break-all mt-1 block"
