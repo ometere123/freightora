@@ -1,9 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "genlayer-js";
-import { studionet } from "genlayer-js/chains";
+import { createPublicClient, createWalletClient, http, defineChain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
+const studionet = defineChain({
+  id: 61999,
+  name: "GenLayer Studionet",
+  nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
+  rpcUrls: {
+    default: {
+      http: [process.env.NEXT_PUBLIC_GENLAYER_RPC_URL ?? "https://studio.genlayer.com/api"],
+    },
+  },
+});
+
 const CONTRACT = process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS as `0x${string}`;
+
+const ABI = [
+  {
+    name: "get_config",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    name: "list_cases",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      { name: "offset", type: "string" },
+      { name: "limit", type: "string" },
+    ],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    name: "get_case",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "case_id", type: "string" }],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    name: "review_exception",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [{ name: "case_id", type: "string" }],
+    outputs: [],
+  },
+  {
+    name: "review_reconsideration",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [{ name: "reconsideration_id", type: "string" }],
+    outputs: [],
+  },
+] as const;
 
 function parseJson<T>(raw: unknown): T | null {
   if (typeof raw !== "string" || !raw) return null;
@@ -29,32 +80,22 @@ export async function GET(req: NextRequest) {
   }
 
   const account = privateKeyToAccount(privateKey);
+  const transport = http();
 
-  // Read client — no wallet needed
-  const readClient = createClient({ chain: studionet });
-
-  // Write client — uses private key, no MetaMask
-  const writeClient = createClient({
-    chain: studionet,
-    account: account.address,
-    // @ts-expect-error — genlayer-js accepts a viem account as provider for server-side use
-    provider: account,
-  });
+  const publicClient = createPublicClient({ chain: studionet, transport });
+  const walletClient = createWalletClient({ chain: studionet, account, transport });
 
   try {
-    // Get review fee from config
-    const configRaw = await readClient.readContract({
-      address: CONTRACT,
-      functionName: "get_config",
-      args: [],
+    // Get review fee
+    const configRaw = await publicClient.readContract({
+      address: CONTRACT, abi: ABI, functionName: "get_config",
     });
     const config = parseJson<{ review_fee: string }>(configRaw);
     const fee = BigInt(config?.review_fee ?? "10000000000000000");
 
-    // List all case IDs — args are strings in this contract
-    const idsRaw = await readClient.readContract({
-      address: CONTRACT,
-      functionName: "list_cases",
+    // List all case IDs
+    const idsRaw = await publicClient.readContract({
+      address: CONTRACT, abi: ABI, functionName: "list_cases",
       args: ["0", "200"],
     });
     const ids = parseJson<string[]>(idsRaw);
@@ -62,11 +103,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ triggered: 0, message: "No cases found" });
     }
 
-    // Fetch each case
+    // Fetch each case status
     const caseResults = await Promise.allSettled(
       ids.map((id) =>
-        readClient.readContract({ address: CONTRACT, functionName: "get_case", args: [id] })
-          .then((r) => parseJson<CaseData>(r))
+        publicClient.readContract({
+          address: CONTRACT, abi: ABI, functionName: "get_case", args: [id],
+        }).then((r) => parseJson<CaseData>(r))
       )
     );
 
@@ -82,13 +124,11 @@ export async function GET(req: NextRequest) {
 
     for (const c of reviewReady) {
       try {
-        await writeClient.writeContract({
-          address: CONTRACT,
-          functionName: "review_exception",
-          args: [c.case_id],
-          value: fee,
+        const hash = await walletClient.writeContract({
+          address: CONTRACT, abi: ABI, functionName: "review_exception",
+          args: [c.case_id], value: fee,
         });
-        triggered.push(`review:${c.case_id}`);
+        triggered.push(`review:${c.case_id}:${hash}`);
       } catch (e) {
         errors.push(`review:${c.case_id} — ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -101,13 +141,11 @@ export async function GET(req: NextRequest) {
         continue;
       }
       try {
-        await writeClient.writeContract({
-          address: CONTRACT,
-          functionName: "review_reconsideration",
-          args: [reconId],
-          value: fee,
+        const hash = await walletClient.writeContract({
+          address: CONTRACT, abi: ABI, functionName: "review_reconsideration",
+          args: [reconId], value: fee,
         });
-        triggered.push(`recon:${c.case_id}`);
+        triggered.push(`recon:${c.case_id}:${hash}`);
       } catch (e) {
         errors.push(`recon:${c.case_id} — ${e instanceof Error ? e.message : String(e)}`);
       }
