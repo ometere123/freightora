@@ -1,60 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createPublicClient, createWalletClient, http, defineChain } from "viem";
+import { createClient } from "genlayer-js";
+import { studionet } from "genlayer-js/chains";
+import { createWalletClient, createPublicClient, http, defineChain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-const studionet = defineChain({
+const RPC_URL = process.env.NEXT_PUBLIC_GENLAYER_RPC_URL ?? "https://studio.genlayer.com/api";
+const CONTRACT = process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS as `0x${string}`;
+
+// viem chain def for the wallet transport
+const studionetViem = defineChain({
   id: 61999,
   name: "GenLayer Studionet",
   nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
-  rpcUrls: {
-    default: {
-      http: [process.env.NEXT_PUBLIC_GENLAYER_RPC_URL ?? "https://studio.genlayer.com/api"],
-    },
-  },
+  rpcUrls: { default: { http: [RPC_URL] } },
 });
-
-const CONTRACT = process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS as `0x${string}`;
-
-const ABI = [
-  {
-    name: "get_config",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "string" }],
-  },
-  {
-    name: "list_cases",
-    type: "function",
-    stateMutability: "view",
-    inputs: [
-      { name: "offset", type: "string" },
-      { name: "limit", type: "string" },
-    ],
-    outputs: [{ name: "", type: "string" }],
-  },
-  {
-    name: "get_case",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "case_id", type: "string" }],
-    outputs: [{ name: "", type: "string" }],
-  },
-  {
-    name: "review_exception",
-    type: "function",
-    stateMutability: "payable",
-    inputs: [{ name: "case_id", type: "string" }],
-    outputs: [],
-  },
-  {
-    name: "review_reconsideration",
-    type: "function",
-    stateMutability: "payable",
-    inputs: [{ name: "reconsideration_id", type: "string" }],
-    outputs: [],
-  },
-] as const;
 
 function parseJson<T>(raw: unknown): T | null {
   if (typeof raw !== "string" || !raw) return null;
@@ -80,26 +39,54 @@ export async function GET(req: NextRequest) {
   }
 
   const account = privateKeyToAccount(privateKey);
-  const transport = http();
 
-  const publicClient = createPublicClient({ chain: studionet, transport });
-  const walletClient = createWalletClient({ chain: studionet, account, transport });
+  // Read client — genlayer-js, no provider needed
+  const readClient = createClient({ chain: studionet });
+
+  // EIP-1193 provider backed by viem wallet + public transport
+  const viemWallet = createWalletClient({ account, chain: studionetViem, transport: http() });
+  const viemPublic = createPublicClient({ chain: studionetViem, transport: http() });
+
+  const eip1193Provider = {
+    request: async ({ method, params = [] }: { method: string; params?: unknown[] }) => {
+      if (method === "eth_accounts" || method === "eth_requestAccounts") {
+        return [account.address];
+      }
+      if (method === "eth_chainId") {
+        return "0xf21f"; // 61999
+      }
+      if (method === "eth_sendTransaction") {
+        const tx = (params as Parameters<typeof viemWallet.sendTransaction>)[0];
+        return viemWallet.sendTransaction(tx);
+      }
+      // Forward everything else to the public transport
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (viemPublic as any).request({ method, params });
+    },
+  };
+
+  // Write client — genlayer-js with our EIP-1193 provider
+  const writeClient = createClient({
+    chain: studionet,
+    account: account.address,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    provider: eip1193Provider as any,
+  });
 
   let step = "init";
   try {
     // Get review fee
     step = "get_config";
-    const configRaw = await publicClient.readContract({
-      address: CONTRACT, abi: ABI, functionName: "get_config",
+    const configRaw = await readClient.readContract({
+      address: CONTRACT, functionName: "get_config", args: [],
     });
     const config = parseJson<{ review_fee: string }>(configRaw);
     const fee = BigInt(config?.review_fee ?? "10000000000000000");
 
     // List all case IDs
     step = "list_cases";
-    const idsRaw = await publicClient.readContract({
-      address: CONTRACT, abi: ABI, functionName: "list_cases",
-      args: ["0", "200"],
+    const idsRaw = await readClient.readContract({
+      address: CONTRACT, functionName: "list_cases", args: ["0", "200"],
     });
     step = "parse_ids";
     const ids = parseJson<string[]>(idsRaw);
@@ -108,14 +95,13 @@ export async function GET(req: NextRequest) {
     }
 
     // Fetch each case status
+    step = "fetch_cases";
     const caseResults = await Promise.allSettled(
       ids.map((id) =>
-        publicClient.readContract({
-          address: CONTRACT, abi: ABI, functionName: "get_case", args: [id],
-        }).then((r) => parseJson<CaseData>(r))
+        readClient.readContract({ address: CONTRACT, functionName: "get_case", args: [id] })
+          .then((r) => parseJson<CaseData>(r))
       )
     );
-
     const cases = caseResults.flatMap((r) =>
       r.status === "fulfilled" && r.value ? [r.value] : []
     );
@@ -126,11 +112,14 @@ export async function GET(req: NextRequest) {
     const triggered: string[] = [];
     const errors: string[] = [];
 
+    step = "trigger_reviews";
     for (const c of reviewReady) {
       try {
-        const hash = await walletClient.writeContract({
-          address: CONTRACT, abi: ABI, functionName: "review_exception",
-          args: [c.case_id], value: fee,
+        const hash = await writeClient.writeContract({
+          address: CONTRACT,
+          functionName: "review_exception",
+          args: [c.case_id],
+          value: fee,
         });
         triggered.push(`review:${c.case_id}:${hash}`);
       } catch (e) {
@@ -138,6 +127,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    step = "trigger_recons";
     for (const c of reconReady) {
       const reconId = c.last_reconsideration_id;
       if (!reconId) {
@@ -145,9 +135,11 @@ export async function GET(req: NextRequest) {
         continue;
       }
       try {
-        const hash = await walletClient.writeContract({
-          address: CONTRACT, abi: ABI, functionName: "review_reconsideration",
-          args: [reconId], value: fee,
+        const hash = await writeClient.writeContract({
+          address: CONTRACT,
+          functionName: "review_reconsideration",
+          args: [reconId],
+          value: fee,
         });
         triggered.push(`recon:${c.case_id}:${hash}`);
       } catch (e) {
