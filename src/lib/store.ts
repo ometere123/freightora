@@ -2,6 +2,10 @@
 
 import { create } from "zustand";
 import { getAddress } from "viem";
+import {
+  ensureGenLayerStudionet,
+  getEthereumProvider,
+} from "@/lib/genlayer/config";
 
 interface WalletStore {
   account: `0x${string}` | null;
@@ -15,47 +19,24 @@ export const useWallet = create<WalletStore>((set) => ({
   connecting: false,
 
   connect: async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const eth = (window as any).ethereum as { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } | undefined;
+    const eth = getEthereumProvider();
     if (!eth) {
       alert("No Web3 wallet found. Install MetaMask or a compatible wallet.");
       return;
     }
+
     set({ connecting: true });
     try {
-      const accounts = await eth.request({ method: "eth_requestAccounts" }) as string[];
-      if (accounts[0]) {
-        set({ account: getAddress(accounts[0]) });
-        // Switch to GenLayer Studionet (chain 61999 = 0xF21F)
-        try {
-          await eth.request({
-            method: "wallet_switchEthereumChain",
-            params: [{ chainId: "0xF21F" }],
-          });
-        } catch (switchErr) {
-          // 4902 = chain not added yet — add it
-          const code = (switchErr as { code?: number })?.code;
-          if (code === 4902) {
-            try {
-              await eth.request({
-                method: "wallet_addEthereumChain",
-                params: [{
-                  chainId: "0xF21F",
-                  chainName: "GenLayer Studionet",
-                  nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
-                  rpcUrls: ["https://studio.genlayer.com/api"],
-                  blockExplorerUrls: ["https://explorer-studio.genlayer.com"],
-                }],
-              });
-            } catch {
-              // user dismissed add — not fatal
-            }
-          }
-          // any other error (user rejected switch) — not fatal
-        }
-      }
+      const accounts = (await eth.request({
+        method: "eth_requestAccounts",
+      })) as string[];
+
+      if (!accounts[0]) return;
+
+      await ensureGenLayerStudionet(eth);
+      set({ account: getAddress(accounts[0]) });
     } catch {
-      // user rejected account request
+      // user rejected account or network request
     } finally {
       set({ connecting: false });
     }
@@ -64,19 +45,21 @@ export const useWallet = create<WalletStore>((set) => ({
   disconnect: () => set({ account: null }),
 }));
 
-// Silently restore already-connected account on page load (no MetaMask popup)
 if (typeof window !== "undefined") {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const eth = (window as any).ethereum as { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } | undefined;
+  const eth = getEthereumProvider();
   if (eth) {
-    eth.request({ method: "eth_accounts" }).then((accounts) => {
-      const list = accounts as string[];
-      if (list[0]) useWallet.setState({ account: getAddress(list[0]) });
-    }).catch(() => {});
+    eth.request({ method: "eth_accounts" })
+      .then((accounts) => {
+        const list = accounts as string[];
+        if (list[0]) useWallet.setState({ account: getAddress(list[0]) });
+      })
+      .catch(() => {});
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (eth as any).on?.("accountsChanged", (accounts: string[]) => {
-      useWallet.setState({ account: accounts[0] ? getAddress(accounts[0]) : null });
+    eth.on?.("accountsChanged", (...args: unknown[]) => {
+      const accounts = Array.isArray(args[0]) ? (args[0] as string[]) : [];
+      useWallet.setState({
+        account: accounts[0] ? getAddress(accounts[0]) : null,
+      });
     });
   }
 }

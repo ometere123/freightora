@@ -1,7 +1,15 @@
 "use client";
 
-import { makeReadClient, makeWalletClient } from "./client";
-import { genlayerConfig, isContractConfigured, CONTRACT_NOT_CONFIGURED } from "./config";
+import {
+  ensureWalletOnStudionet,
+  makeReadClient,
+  makeWalletClient,
+} from "./client";
+import {
+  genlayerConfig,
+  isContractConfigured,
+  CONTRACT_NOT_CONFIGURED,
+} from "./config";
 
 function addr(): `0x${string}` {
   if (!isContractConfigured) throw new Error(CONTRACT_NOT_CONFIGURED);
@@ -10,7 +18,11 @@ function addr(): `0x${string}` {
 
 function parseJson(raw: unknown): unknown {
   if (typeof raw !== "string" || !raw) return null;
-  try { return JSON.parse(raw); } catch { return null; }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,14 +57,15 @@ async function writeFn(
   args: unknown[],
   value: bigint = BigInt(0),
 ): Promise<unknown> {
+  await ensureWalletOnStudionet();
+
   const client = makeWalletClient(account);
-  if (!client) throw new Error("No wallet found. Install MetaMask and connect it to GenLayer Studionet.");
-  try {
-    await client.connect("studionet");
-  } catch (e) {
-    // network switch rejected or already on correct chain — continue anyway
-    console.warn("[writeFn] connect() warning:", e);
+  if (!client) {
+    throw new Error(
+      "No wallet found. Install MetaMask and connect it to GenLayer Studionet.",
+    );
   }
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const params: any = {
@@ -67,39 +80,25 @@ async function writeFn(
   }
 }
 
-// ── Views ──────────────────────────────────────────────────────────────────
-
-export const getCase = (id: string) =>
-  readFn("get_case", [id]).then(parseJson);
-
+export const getCase = (id: string) => readFn("get_case", [id]).then(parseJson);
 export const getReview = (caseId: string) =>
   readFn("get_review", [caseId]).then(parseJson);
-
 export const getResponse = (id: string) =>
   readFn("get_response", [id]).then(parseJson);
-
 export const getEvidence = (id: string) =>
   readFn("get_evidence", [id]).then(parseJson);
-
 export const getExplanation = (id: string) =>
   readFn("get_explanation", [id]).then(parseJson);
-
 export const getSettlement = (id: string) =>
   readFn("get_settlement", [id]).then(parseJson);
-
 export const getReconsideration = (id: string) =>
   readFn("get_reconsideration", [id]).then(parseJson);
-
 export const getReconsiderationReview = (id: string) =>
   readFn("get_reconsideration_review", [id]).then(parseJson);
-
-export const getProtocolStats = () =>
-  readFn("get_protocol_stats").then(parseJson);
-
-export const getConfig = () =>
-  readFn("get_config").then(parseJson);
-
-export const listCases = (offset = 0, limit = 20) => listAllCases(offset, limit);
+export const getProtocolStats = () => readFn("get_protocol_stats").then(parseJson);
+export const getConfig = () => readFn("get_config").then(parseJson);
+export const listCases = (offset = 0, limit = 20) =>
+  listAllCases(offset, limit);
 
 export async function listAllCases(offset = 0, limit = 200): Promise<string[]> {
   const raw = await readFn("list_cases", [String(offset), String(limit)]);
@@ -118,9 +117,14 @@ function parseIds(raw: unknown): string[] {
   return Array.isArray(p) ? (p as string[]) : [];
 }
 
-async function fetchByIds<T>(ids: string[], fetch: (id: string) => Promise<unknown>): Promise<T[]> {
+async function fetchByIds<T>(
+  ids: string[],
+  fetch: (id: string) => Promise<unknown>,
+): Promise<T[]> {
   const results = await Promise.allSettled(ids.map(fetch));
-  return results.flatMap((r) => (r.status === "fulfilled" && r.value ? [r.value as T] : []));
+  return results.flatMap((r) =>
+    r.status === "fulfilled" && r.value ? [r.value as T] : [],
+  );
 }
 
 export async function getResponsesForCase(caseId: string) {
@@ -148,8 +152,6 @@ export async function getReconsiderationsForCase(caseId: string) {
   return fetchByIds(ids, getReconsideration);
 }
 
-// ── Writes ─────────────────────────────────────────────────────────────────
-
 export const openCase = (
   account: `0x${string}`,
   caseId: string,
@@ -175,12 +177,15 @@ export const submitExplanation = (
   explanationId: string,
   caseId: string,
   explanationJson: string,
-) => writeFn(account, "submit_explanation", [explanationId, caseId, explanationJson]);
+) =>
+  writeFn(account, "submit_explanation", [
+    explanationId,
+    caseId,
+    explanationJson,
+  ]);
 
-export const markReadyForReview = (
-  account: `0x${string}`,
-  caseId: string,
-) => writeFn(account, "mark_ready_for_review", [caseId]);
+export const markReadyForReview = (account: `0x${string}`, caseId: string) =>
+  writeFn(account, "mark_ready_for_review", [caseId]);
 
 export const REVIEW_FEE = BigInt("10000000000000000");
 
@@ -201,7 +206,12 @@ export const openSettlementPath = (
   settlementId: string,
   caseId: string,
   settlementJson: string,
-) => writeFn(account, "open_settlement_path", [settlementId, caseId, settlementJson]);
+) =>
+  writeFn(account, "open_settlement_path", [
+    settlementId,
+    caseId,
+    settlementJson,
+  ]);
 
 export const acceptSettlement = (
   account: `0x${string}`,
@@ -214,7 +224,12 @@ export const openReconsideration = (
   reconsiderationId: string,
   caseId: string,
   reconsiderationJson: string,
-) => writeFn(account, "open_reconsideration", [reconsiderationId, caseId, reconsiderationJson]);
+) =>
+  writeFn(account, "open_reconsideration", [
+    reconsiderationId,
+    caseId,
+    reconsiderationJson,
+  ]);
 
 export const finalizeCase = (
   account: `0x${string}`,
@@ -228,15 +243,11 @@ export const cancelCase = (
   reason: string,
 ) => writeFn(account, "cancel_case", [caseId, reason]);
 
-export const addResolver = (
-  account: `0x${string}`,
-  resolver: string,
-) => writeFn(account, "add_resolver", [resolver]);
+export const addResolver = (account: `0x${string}`, resolver: string) =>
+  writeFn(account, "add_resolver", [resolver]);
 
-export const removeResolver = (
-  account: `0x${string}`,
-  resolver: string,
-) => writeFn(account, "remove_resolver", [resolver]);
+export const removeResolver = (account: `0x${string}`, resolver: string) =>
+  writeFn(account, "remove_resolver", [resolver]);
 
 export const pauseProtocol = (account: `0x${string}`) =>
   writeFn(account, "pause_protocol", []);
