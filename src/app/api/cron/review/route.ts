@@ -66,8 +66,8 @@ export async function GET(req: NextRequest) {
           value: tx.value ? BigInt(tx.value) : undefined,
           gas: tx.gas ? BigInt(tx.gas) : undefined,
           type: "eip1559",
-          maxFeePerGas: 0n,
-          maxPriorityFeePerGas: 0n,
+          maxFeePerGas: BigInt(0),
+          maxPriorityFeePerGas: BigInt(0),
         });
       }
       // Forward everything else to the public transport
