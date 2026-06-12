@@ -57,14 +57,17 @@ export async function GET(req: NextRequest) {
       }
       if (method === "eth_sendTransaction") {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tx = (params as any[])[0] as Record<string, unknown>;
-        return viemWallet.sendTransaction({
-          ...(tx as Parameters<typeof viemWallet.sendTransaction>[0]),
-          // Force EIP-1559 (type 2) — GenLayer rejects legacy type-0 raw txs
+        const tx = (params as any[])[0] as any;
+        // Force EIP-1559 (type 2) — GenLayer rejects legacy type-0 raw txs
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (viemWallet.sendTransaction as any)({
+          to: tx.to,
+          data: tx.data,
+          value: tx.value ? BigInt(tx.value) : undefined,
+          gas: tx.gas ? BigInt(tx.gas) : undefined,
           type: "eip1559",
           maxFeePerGas: 0n,
           maxPriorityFeePerGas: 0n,
-          gasPrice: undefined,
         });
       }
       // Forward everything else to the public transport
