@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useWallet } from "@/lib/store";
 import { useAccessControl } from "@/lib/hooks/useAccessControl";
 import { shortAddr } from "@/lib/utils";
-import { isContractConfigured, CONTRACT_NOT_CONFIGURED } from "@/lib/genlayer/config";
+import { isContractConfigured, CONTRACT_NOT_CONFIGURED, genlayerConfig } from "@/lib/genlayer/config";
 
 const BASE_NAV = [
   { href: "/", label: "Dock", role: "public" },
@@ -195,7 +195,14 @@ export function TxBanner({
           <p className="h-font text-xl uppercase tracking-[0.06em]">{label}</p>
           <p className="text-base text-fog-grey">{message}</p>
           {hash && (
-            <p className="mono-font text-xs text-fog-grey/60 break-all mt-1">TX: {hash}</p>
+            <a
+              href={`${genlayerConfig.explorerUrl}tx/${hash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mono-font text-xs text-signal-cyan/60 hover:text-signal-cyan break-all mt-1 block"
+            >
+              TX: {hash} ↗
+            </a>
           )}
         </div>
         {state !== "pending" && (
