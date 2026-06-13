@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Freightora — Cargo Exception Resolution
 
-## Getting Started
+GenLayer-powered cargo exception resolution dApp. Disputes are resolved by evidence, records, and AI consensus — not arbitrators.
 
-First, run the development server:
+## What It Does
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Freightora lets shippers, carriers, and warehouse operators file and resolve cargo exceptions (damage, shortage, delay, temperature excursion) on-chain. GenLayer validators independently review all evidence and produce a liability ruling. No human arbitrator decides the outcome.
+
+## User Roles
+
+| Role | Can Do |
+|---|---|
+| **Claimant** | Open case, add evidence, mark ready for review, propose/accept settlement, finalize, cancel |
+| **Respondent** | Submit response, add evidence, propose/accept settlement, open reconsideration |
+| **Resolver / Admin** | Everything above + trigger GenLayer review from `/resolve` queue |
+
+## Case Flow
+
+```
+OPENED → CLAIM_EVIDENCE_SUBMITTED → RESPONDED → READY_FOR_REVIEW
+→ UNDER_REVIEW → REVIEWED → FINALIZED
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Branch paths: `SETTLEMENT_PROPOSED → SETTLEMENT_ACCEPTED → FINALIZED` or `RECONSIDERATION_REQUESTED → READY_FOR_RECONSIDERATION_REVIEW → REVIEWED → FINALIZED`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Frontend** — Next.js 16 (App Router, Turbopack), Tailwind CSS
+- **Chain** — GenLayer Studionet (chainId 61999)
+- **SDK** — genlayer-js, viem
+- **Wallet** — MetaMask (EIP-1193)
+- **Cron** — cron-job.org → `/api/cron/review` (auto-triggers review every 5 min)
 
-## Learn More
+## Environment Variables
 
-To learn more about Next.js, take a look at the following resources:
+```env
+NEXT_PUBLIC_GENLAYER_NETWORK_NAME=GenLayer Studionet
+NEXT_PUBLIC_GENLAYER_CHAIN_ID=61999
+NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
+NEXT_PUBLIC_GENLAYER_EXPLORER_URL=https://explorer-studio.genlayer.com
+NEXT_PUBLIC_GENLAYER_CURRENCY=GEN
+NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=<your_contract_address>
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+# Server-side only (cron job)
+CRON_SECRET=<random_secret>
+ADMIN_PRIVATE_KEY=<admin_wallet_private_key>
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Local Development
 
-## Deploy on Vercel
+```bash
+npm install
+cp .env.example .env.local
+# fill in .env.local
+npm run dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Open [http://localhost:3000](http://localhost:3000).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployment
+
+Deploy on Vercel. Set all environment variables in **Project Settings → Environment Variables**. The cron job runs via [cron-job.org](https://cron-job.org) hitting `/api/cron/review` every 5 minutes with `Authorization: Bearer <CRON_SECRET>`.
+
+## Contract
+
+Freightora smart contract is a GenLayer Python AI contract at `contracts/Freightora.py`. Deploy via GenLayer Studio.
